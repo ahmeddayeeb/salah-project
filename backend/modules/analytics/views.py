@@ -171,32 +171,59 @@ class FinancialHealthScoreView(APIView):
 
     def get(self, request):
         user = request.user
-        income = Transaction.objects.filter(user=user, type='INCOME').aggregate(Sum('amount'))['amount__sum'] or Decimal('1') 
-        expenses = Transaction.objects.filter(user=user, type='EXPENSE').aggregate(Sum('amount'))['amount__sum'] or Decimal('0')
-        wealth_ratio = (income - expenses) / income if income > 0 else 0
-        
-        total_target = SavingGoal.objects.filter(user=user).aggregate(Sum('target_amount'))['target_amount__sum'] or Decimal('1')
-        total_current = SavingGoal.objects.filter(user=user).aggregate(Sum('current_amount'))['current_amount__sum'] or Decimal('0')
-        savings_ratio = total_current / total_target
-        
+
+        has_transactions = Transaction.objects.filter(user=user).exists()
+        has_savings = SavingGoal.objects.filter(user=user).exists()
         budgets = Budget.objects.filter(user=user)
-        total_budget = budgets.aggregate(Sum('limit'))['limit__sum'] or Decimal('1')
-        over_budget_total = Decimal('0')
-        for b in budgets:
-            category_spend = Transaction.objects.filter(user=user, category=b.category, type='EXPENSE').aggregate(Sum('amount'))['amount__sum'] or Decimal('0')
-            if category_spend > b.limit:
-                over_budget_total += (category_spend - b.limit)
-        
-        budget_discipline = 1 - (over_budget_total / total_budget)
-        
+        has_budgets = budgets.exists()
+
+        # If it's a new account with no transactions, savings goals, or budgets, start at 100%
+        if not has_transactions and not has_savings and not has_budgets:
+            return Response({
+                "score": 100.0,
+                "breakdown": {
+                    "wealth_ratio": 1.0,
+                    "savings_ratio": 1.0,
+                    "budget_discipline": 1.0
+                }
+            })
+
+        if not has_transactions:
+            wealth_ratio = Decimal('1')
+        else:
+            income = Transaction.objects.filter(user=user, type='INCOME').aggregate(Sum('amount'))['amount__sum'] or Decimal('0')
+            expenses = Transaction.objects.filter(user=user, type='EXPENSE').aggregate(Sum('amount'))['amount__sum'] or Decimal('0')
+            if income > 0:
+                wealth_ratio = max(Decimal('0'), (income - expenses) / income)
+            else:
+                wealth_ratio = Decimal('0') if expenses > 0 else Decimal('1')
+
+        if not has_savings:
+            savings_ratio = Decimal('1')
+        else:
+            total_target = SavingGoal.objects.filter(user=user).aggregate(Sum('target_amount'))['target_amount__sum'] or Decimal('0')
+            total_current = SavingGoal.objects.filter(user=user).aggregate(Sum('current_amount'))['current_amount__sum'] or Decimal('0')
+            savings_ratio = min(Decimal('1'), total_current / total_target) if total_target > 0 else Decimal('1')
+
+        if not has_budgets:
+            budget_discipline = Decimal('1')
+        else:
+            total_budget = budgets.aggregate(Sum('limit'))['limit__sum'] or Decimal('0')
+            over_budget_total = Decimal('0')
+            for b in budgets:
+                category_spend = Transaction.objects.filter(user=user, category=b.category, type='EXPENSE').aggregate(Sum('amount'))['amount__sum'] or Decimal('0')
+                if category_spend > b.limit:
+                    over_budget_total += (category_spend - b.limit)
+            budget_discipline = max(Decimal('0'), 1 - (over_budget_total / total_budget)) if total_budget > 0 else Decimal('1')
+
         metrics = {
             "wealth_ratio": float(wealth_ratio),
             "savings_ratio": float(savings_ratio),
             "budget_discipline": float(budget_discipline)
         }
-        
+
         score = get_financial_score_breakdown(metrics)
-        
+
         return Response({
             "score": score,
             "breakdown": metrics

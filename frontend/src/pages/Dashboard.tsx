@@ -81,7 +81,7 @@ const Dashboard = () => {
     queryFn: fetchNotifications,
   });
 
-  const score = healthScore?.score || 0;
+  const score = healthScore?.score !== undefined ? healthScore.score : 100;
 
   const aiChartData = useMemo(() => {
     if (!aiAdvice?.breakdown) return null;
@@ -169,7 +169,7 @@ const Dashboard = () => {
               thickness={5}
               sx={{
                 color:
-                  score > 70 ? "var(--color-income)" : "var(--color-warning)",
+                  score >= 70 ? "var(--color-income)" : "var(--color-warning)",
               }}
             />
             <Box
@@ -197,10 +197,10 @@ const Dashboard = () => {
             sx={{
               fontWeight: 600,
               color:
-                score > 70 ? "var(--color-income)" : "var(--color-warning)",
+                score >= 70 ? "var(--color-income)" : "var(--color-warning)",
             }}
           >
-            {score > 70 ? "Excellent Habits!" : "Room for Improvement"}
+            {score >= 70 ? "Excellent Habits!" : "Room for Improvement"}
           </Typography>
         </Paper>
 
